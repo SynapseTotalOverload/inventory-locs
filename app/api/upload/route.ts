@@ -134,15 +134,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Rest of the code remains the same...
-    // (keeping all the existing location, product, and inventory processing logic)
-
-    // Insert valid transactions
-    const transactionsToInsert = valid.map(item => ({
-      ...item,
-      csv_upload_id: uploadRecord.id,
-    }));
-
     // Step 1: Get all unique location codes from valid transactions
     const uniqueLocationCodes = [...new Set(valid.map(tx => tx.location_code))];
     console.log("Unique location codes:", uniqueLocationCodes);
@@ -242,9 +233,46 @@ export async function POST(request: NextRequest) {
       console.log("Updated product map:", Array.from(productMap.entries()));
     }
 
+    // Now that we have both maps, insert sales transactions
+    const transactionsToInsert = valid.map(item => ({
+      location_code: item.location_code,
+      location_id: locationMap.get(item.location_code),
+      product_name: item.product_name || `Product ${item.upc_code}`,
+      upc_code: item.upc_code,
+      product_id: productMap.get(item.upc_code),
+      transaction_date: item.transaction_date || new Date().toISOString().split("T")[0], // Ensure it's a date
+      unit_price: (item.unit_price || 0).toString(),
+      final_amount: (item.unit_price || 0).toString(), // Since each transaction is for one unit
+      vendor: item.vendor || "unknown",
+      csv_upload_id: uploadRecord.id,
+      processed_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    }));
+
+    // Insert sales transactions in batches
+    console.log("Inserting sales transactions:", transactionsToInsert.length);
+    console.log("Sample transaction:", transactionsToInsert[0]);
+
+    const BATCH_SIZE = 1000;
+    for (let i = 0; i < transactionsToInsert.length; i += BATCH_SIZE) {
+      const batch = transactionsToInsert.slice(i, i + BATCH_SIZE);
+      const { error: salesError } = await supabase.from("sales_transactions").insert(batch);
+
+      if (salesError) {
+        console.error("Failed to insert sales batch:", salesError);
+        return NextResponse.json(
+          {
+            error: "Failed to insert sales transactions",
+            details: salesError,
+          },
+          { status: 500 },
+        );
+      }
+    }
+    console.log("Successfully inserted all sales transactions");
+
     // After successful sales transaction insert
     // Group transactions by location and product
-    const BATCH_SIZE = 1000;
     const inventoryUpdatesMap = new Map<string, { location_code: string; upc_code: string; quantity: number }>();
 
     valid.forEach(transaction => {
