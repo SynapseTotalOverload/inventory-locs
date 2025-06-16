@@ -100,7 +100,58 @@ export async function POST(request: NextRequest) {
       csv_upload_id: uploadRecord.id,
     }));
 
-    const { error: insertError } = await supabase.from("sales_transactions").insert(transactionsToInsert);
+    // Step 1: Get all unique location codes from valid transactions
+    const uniqueLocationCodes = [...new Set(valid.map(tx => tx.location_code))];
+
+    // Step 2: Fetch existing locations
+    const { data: existingLocations, error: fetchError } = await supabase
+      .from("locations")
+      .select("id, name")
+      .in("name", uniqueLocationCodes);
+
+    if (fetchError) {
+      return NextResponse.json({ error: "Failed to fetch locations", details: fetchError }, { status: 500 });
+    }
+
+    const locationMap = new Map(existingLocations.map(loc => [loc.name, loc.id]));
+
+    // Step 3: Create missing locations
+    for (const code of uniqueLocationCodes) {
+      if (!locationMap.has(code)) {
+        const { data: newLoc, error: createError } = await supabase
+          .from("locations")
+          .insert({
+            name: code,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .select("id")
+          .single();
+
+        if (createError) {
+          return NextResponse.json(
+            {
+              error: `Failed to create location for code ${code}`,
+              details: createError,
+            },
+            { status: 500 },
+          );
+        }
+
+        locationMap.set(code, newLoc.id);
+      }
+    }
+
+    // Step 4: Attach location_id to transactions
+    const transactionsWithLocationIds = transactionsToInsert.map(transaction => {
+      const locationId = locationMap.get(transaction.location_code);
+      return {
+        ...transaction,
+        location_id: locationId,
+      };
+    });
+
+    const { error: insertError } = await supabase.from("sales_transactions").insert(transactionsWithLocationIds);
 
     if (insertError) {
       // Update upload record with error
@@ -185,6 +236,7 @@ export async function POST(request: NextRequest) {
             .insert({
               sku: update.upc_code,
               name: `Product ${update.upc_code}`, // Default name based on UPC
+              unit_price: 0, // Default unit price
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
