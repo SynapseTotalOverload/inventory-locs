@@ -95,6 +95,7 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
       }
 
       const data = (await response.json()) as UploadResponse;
+
       setPreview(data.preview);
       setValidationResults({
         valid: data.stats.validRecords,
