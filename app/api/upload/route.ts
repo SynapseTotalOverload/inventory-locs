@@ -116,30 +116,31 @@ export async function POST(request: NextRequest) {
     const locationMap = new Map(existingLocations.map(loc => [loc.name, loc.id]));
 
     // Step 3: Create missing locations
-    for (const code of uniqueLocationCodes) {
-      if (!locationMap.has(code)) {
-        const { data: newLoc, error: createError } = await supabase
-          .from("locations")
-          .insert({
-            name: code,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .select("id")
-          .single();
+    const missingLocations = uniqueLocationCodes.filter(code => !locationMap.has(code));
+    if (missingLocations.length > 0) {
+      const newLocations = missingLocations.map(code => ({
+        name: code,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
 
-        if (createError) {
-          return NextResponse.json(
-            {
-              error: `Failed to create location for code ${code}`,
-              details: createError,
-            },
-            { status: 500 },
-          );
-        }
+      const { data: createdLocations, error: batchCreateError } = await supabase
+        .from("locations")
+        .insert(newLocations)
+        .select("id, name");
 
-        locationMap.set(code, newLoc.id);
+      if (batchCreateError) {
+        return NextResponse.json(
+          {
+            error: "Failed to create locations in batch",
+            details: batchCreateError,
+          },
+          { status: 500 },
+        );
       }
+
+      // Update location map with new locations
+      createdLocations.forEach(loc => locationMap.set(loc.name, loc.id));
     }
 
     // Step 4: Attach location_id to transactions
@@ -151,144 +152,180 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    const { error: insertError } = await supabase.from("sales_transactions").insert(transactionsWithLocationIds);
+    // Insert transactions in batches of 1000
+    const BATCH_SIZE = 1000;
+    for (let i = 0; i < transactionsWithLocationIds.length; i += BATCH_SIZE) {
+      const batch = transactionsWithLocationIds.slice(i, i + BATCH_SIZE);
+      const { error: insertError } = await supabase.from("sales_transactions").insert(batch);
 
-    if (insertError) {
-      // Update upload record with error
-      await supabase
-        .from("csv_uploads")
-        .update({
-          status: "failed",
-          processed_at: new Date().toISOString(),
-          records_processed: 0,
-          errors_count: invalid.length,
-          error_log: JSON.stringify({ insertError, validationErrors: invalid }),
-        })
-        .eq("id", uploadRecord.id);
+      if (insertError) {
+        // Update upload record with error
+        await supabase
+          .from("csv_uploads")
+          .update({
+            status: "failed",
+            processed_at: new Date().toISOString(),
+            records_processed: i,
+            errors_count: invalid.length,
+            error_log: JSON.stringify({ insertError, validationErrors: invalid }),
+          })
+          .eq("id", uploadRecord.id);
 
-      return NextResponse.json({ error: "Failed to insert transactions", details: insertError }, { status: 500 });
+        return NextResponse.json({ error: "Failed to insert transactions", details: insertError }, { status: 500 });
+      }
     }
 
     // After successful sales transaction insert
     // Group transactions by location and product
-    const inventoryUpdates = new Map<string, { location_code: string; upc_code: string; quantity: number }>();
+    const inventoryUpdatesMap = new Map<string, { location_code: string; upc_code: string; quantity: number }>();
 
     valid.forEach(transaction => {
       const key = `${transaction.location_code}_${transaction.upc_code}`;
-      const current = inventoryUpdates.get(key) || {
+      const current = inventoryUpdatesMap.get(key) || {
         location_code: transaction.location_code,
         upc_code: transaction.upc_code,
         quantity: 0,
       };
       current.quantity += 1; // Each transaction represents one unit sold
-      inventoryUpdates.set(key, current);
+      inventoryUpdatesMap.set(key, current);
     });
 
-    // Update inventory for each location/product combination
-    for (const update of inventoryUpdates.values()) {
-      // Get location ID from our existing map
-      const locationId = locationMap.get(update.location_code);
-      if (!locationId) {
-        console.error(`Location ${update.location_code} not found in location map`);
-        continue;
-      }
+    // Get all unique UPC codes
+    const uniqueUpcCodes = [...new Set(valid.map(tx => tx.upc_code))];
 
-      // Then, get or create the product
-      let product;
-      const { data: existingProduct, error: productError } = await supabase
+    // Fetch existing products in batch
+    const { data: existingProducts, error: productsError } = await supabase
+      .from("products")
+      .select("id, sku")
+      .in("sku", uniqueUpcCodes);
+
+    if (productsError) {
+      console.error("Failed to fetch existing products:", productsError);
+      return NextResponse.json({ error: "Failed to fetch products", details: productsError }, { status: 500 });
+    }
+
+    const productMap = new Map(existingProducts.map(p => [p.sku, p.id]));
+
+    // Create missing products in batch
+    const missingProducts = uniqueUpcCodes.filter(upc => !productMap.has(upc));
+    if (missingProducts.length > 0) {
+      const newProducts = missingProducts.map(upc => ({
+        sku: upc,
+        name: `Product ${upc}`,
+        unit_price: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { data: createdProducts, error: createProductsError } = await supabase
         .from("products")
-        .select("id")
-        .eq("sku", update.upc_code)
-        .single();
+        .insert(newProducts)
+        .select("id, sku");
 
-      if (productError) {
-        if (productError.code === "PGRST116") {
-          // Product doesn't exist, create it
-          const { data: newProduct, error: createError } = await supabase
-            .from("products")
-            .insert({
-              sku: update.upc_code,
-              name: `Product ${update.upc_code}`,
-              unit_price: 0,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .select("id")
-            .single();
-
-          if (createError) {
-            console.error(`Failed to create product for UPC ${update.upc_code}:`, createError);
-            continue;
-          }
-          product = newProduct;
-        } else {
-          console.error(`Failed to find product for UPC ${update.upc_code}:`, productError);
-          continue;
-        }
-      } else {
-        product = existingProduct;
+      if (createProductsError) {
+        console.error("Failed to create products in batch:", createProductsError);
+        return NextResponse.json({ error: "Failed to create products", details: createProductsError }, { status: 500 });
       }
 
-      // Check if inventory record exists
-      const { data: existingInventory, error: inventoryCheckError } = await supabase
-        .from("inventory")
-        .select("id, quantity")
-        .eq("location_id", locationId)
-        .eq("product_id", product.id)
-        .single();
+      createdProducts.forEach(p => productMap.set(p.sku, p.id));
+    }
 
-      if (inventoryCheckError && inventoryCheckError.code !== "PGRST116") {
-        console.error(`Failed to check inventory:`, inventoryCheckError);
+    // Fetch existing inventory records in batch
+    const inventoryKeys = Array.from(inventoryUpdatesMap.keys());
+    const existingInventoryRecords = new Map();
+
+    for (let i = 0; i < inventoryKeys.length; i += BATCH_SIZE) {
+      const batch = inventoryKeys.slice(i, i + BATCH_SIZE);
+      const locationProductPairs = batch.map(key => {
+        const [locationCode, upcCode] = key.split("_");
+        return {
+          location_id: locationMap.get(locationCode),
+          product_id: productMap.get(upcCode),
+        };
+      });
+
+      const { data: inventoryBatch, error: inventoryError } = await supabase
+        .from("inventory")
+        .select("id, location_id, product_id, quantity")
+        .or(
+          locationProductPairs
+            .map(pair => `and(location_id.eq.${pair.location_id},product_id.eq.${pair.product_id})`)
+            .join(","),
+        );
+
+      if (inventoryError) {
+        console.error("Failed to fetch inventory batch:", inventoryError);
         continue;
       }
 
-      if (existingInventory) {
-        // Update existing inventory - subtract sold quantity
-        const newQuantity = Math.max(0, (existingInventory.quantity || 0) - update.quantity);
-        const { error: updateError } = await supabase
-          .from("inventory")
-          .update({
-            quantity: newQuantity,
-            last_updated: new Date().toISOString(),
-            updated_by: session.user.id,
-          })
-          .eq("id", existingInventory.id);
+      inventoryBatch.forEach(record => {
+        const key = `${record.location_id}_${record.product_id}`;
+        existingInventoryRecords.set(key, record);
+      });
+    }
 
-        if (updateError) {
-          console.error(`Failed to update inventory:`, updateError);
-        }
+    // Prepare batch updates and inserts
+    const inventoryUpdatesList: Array<{
+      id: string;
+      quantity: number;
+      last_updated: string;
+      updated_by: string;
+    }> = [];
+    const inventoryInsertsList: Array<{
+      location_id: string;
+      product_id: string;
+      quantity: number;
+      min_stock_level: number;
+      max_stock_level: number;
+      last_updated: string;
+      updated_by: string;
+    }> = [];
+
+    for (const [key, update] of inventoryUpdatesMap.entries()) {
+      const [locationCode, upcCode] = key.split("_");
+      const locationId = locationMap.get(locationCode);
+      const productId = productMap.get(upcCode);
+      const existingRecord = existingInventoryRecords.get(`${locationId}_${productId}`);
+
+      if (existingRecord) {
+        const newQuantity = Math.max(0, (existingRecord.quantity || 0) - update.quantity);
+        inventoryUpdatesList.push({
+          id: existingRecord.id,
+          quantity: newQuantity,
+          last_updated: new Date().toISOString(),
+          updated_by: session.user.id,
+        });
       } else {
-        // Check for any existing inventory record with the same location_id and product_id
-        const { data: duplicateCheck, error: duplicateError } = await supabase
-          .from("inventory")
-          .select("id")
-          .eq("location_id", locationId)
-          .eq("product_id", product.id)
-          .maybeSingle();
-
-        if (duplicateError) {
-          console.error(`Failed to check for duplicate inventory:`, duplicateError);
-          continue;
-        }
-
-        if (duplicateCheck) {
-          console.error(`Duplicate inventory record found for location ${locationId} and product ${product.id}`);
-          continue;
-        }
-
-        // Create new inventory record with initial quantity
-        const { error: insertError } = await supabase.from("inventory").insert({
+        inventoryInsertsList.push({
           location_id: locationId,
-          product_id: product.id,
-          quantity: 0, // Start with 0 since we're subtracting sold items
+          product_id: productId,
+          quantity: 0,
           min_stock_level: 0,
           max_stock_level: 1000,
           last_updated: new Date().toISOString(),
           updated_by: session.user.id,
         });
+      }
+    }
 
+    // Execute batch updates
+    if (inventoryUpdatesList.length > 0) {
+      for (let i = 0; i < inventoryUpdatesList.length; i += BATCH_SIZE) {
+        const batch = inventoryUpdatesList.slice(i, i + BATCH_SIZE);
+        const { error: updateError } = await supabase.from("inventory").upsert(batch);
+        if (updateError) {
+          console.error("Failed to update inventory batch:", updateError);
+        }
+      }
+    }
+
+    // Execute batch inserts
+    if (inventoryInsertsList.length > 0) {
+      for (let i = 0; i < inventoryInsertsList.length; i += BATCH_SIZE) {
+        const batch = inventoryInsertsList.slice(i, i + BATCH_SIZE);
+        const { error: insertError } = await supabase.from("inventory").insert(batch);
         if (insertError) {
-          console.error(`Failed to create inventory record:`, insertError);
+          console.error("Failed to insert inventory batch:", insertError);
         }
       }
     }
