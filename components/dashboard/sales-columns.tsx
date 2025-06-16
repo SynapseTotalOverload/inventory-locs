@@ -56,7 +56,7 @@ export const salesColumns: ColumnDef<SalesTransaction>[] = [
       return (
         <div>
           <div className="font-medium">{row.getValue("product_name")}</div>
-          <div className="text-sm text-muted-foreground">{row.original.scancode}</div>
+          <div className="text-sm text-muted-foreground">{row.original.upc_code}</div>
         </div>
       );
     },

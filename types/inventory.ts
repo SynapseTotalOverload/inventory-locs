@@ -33,17 +33,17 @@ export interface InventoryItem {
 
 export interface SalesTransaction {
   id?: string;
-  location_id: string;
+  location_code: string;
+  location_id?: string;
   product_name: string;
-  scancode: string;
+  upc_code: string;
   transaction_date: string;
-  price: number;
-  total_amount: number;
+  unit_price: number;
+  final_amount: number;
   vendor: "vendor_a" | "vendor_b";
   category?: string;
   csv_upload_id?: string;
   created_at?: string;
-  raw_data?: string[];
 }
 
 export interface CSVUpload {

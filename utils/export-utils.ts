@@ -18,10 +18,10 @@ export function exportSalesToCSV(sales: SalesTransaction[]) {
   const headers = ["Date", "Location", "Product", "Price", "Total Amount", "Vendor", "Category"];
   const rows = sales.map(sale => [
     new Date(sale.transaction_date).toLocaleDateString(),
-    sale.location_id,
+    sale.location_code,
     sale.product_name,
-    sale.price,
-    sale.total_amount,
+    sale.unit_price,
+    sale.final_amount,
     sale.vendor === "vendor_a" ? "Vendor A" : "Vendor B",
     sale.category,
   ]);

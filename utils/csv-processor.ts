@@ -53,10 +53,7 @@ export function detectVendorFormat(headers: string[]): VendorFormat {
   return "unknown";
 }
 
-function normalizeLocationId(
-  locationId: string,
-  vendor: VendorFormat,
-): { location_id: string; normalized_location_id: string } {
+function normalizeLocationId(locationId: string, vendor: VendorFormat): { location_code: string } {
   // Remove any non-alphanumeric characters except underscores and dots
   const cleaned = locationId.replace(/[^a-zA-Z0-9._]/g, "");
 
@@ -67,20 +64,17 @@ function normalizeLocationId(
   if (vendor === "vendor_a") {
     // Vendor A format: 2.0_SW_02 -> sw_02
     return {
-      location_id: locationId,
-      normalized_location_id: normalized.replace(/^\d+\.\d+_/, ""),
+      location_code: normalized.replace(/^\d+\.\d+_/, ""),
     };
   } else if (vendor === "vendor_b") {
     // Vendor B format: SW_02 -> sw_02
     return {
-      location_id: locationId,
-      normalized_location_id: normalized,
+      location_code: normalized,
     };
   }
 
   return {
-    location_id: locationId,
-    normalized_location_id: normalized,
+    location_code: normalized,
   };
 }
 
@@ -90,23 +84,22 @@ export function normalizeVendorAData(rows: string[][], headers: string[]): Parti
   return rows.slice(1).map((row, index) => {
     const locationId = row[headerMap.get("Location_ID")!];
     const productName = row[headerMap.get("Product_Name")!];
-    const scancode = row[headerMap.get("Scancode")!];
+    const upcCode = row[headerMap.get("Scancode")!];
     const transDate = row[headerMap.get("Trans_Date")!];
-    const price = parseFloat(row[headerMap.get("Price")!]);
-    const totalAmount = parseFloat(row[headerMap.get("Total_Amount")!]);
+    const unitPrice = parseFloat(row[headerMap.get("Price")!]);
+    const finalAmount = parseFloat(row[headerMap.get("Total_Amount")!]);
 
-    const { location_id, normalized_location_id } = normalizeLocationId(locationId, "vendor_a");
+    const { location_code } = normalizeLocationId(locationId, "vendor_a");
 
     return {
-      location_id,
-      normalized_location_id,
+      location_code: locationId,
+      location_id: location_code,
       product_name: productName,
-      scancode,
+      upc_code: upcCode,
       transaction_date: new Date(transDate).toISOString(),
-      price,
-      total_amount: totalAmount,
+      unit_price: unitPrice,
+      final_amount: finalAmount,
       vendor: "vendor_a",
-      raw_data: row,
     };
   });
 }
@@ -117,23 +110,22 @@ export function normalizeVendorBData(rows: string[][], headers: string[]): Parti
   return rows.slice(1).map((row, index) => {
     const siteCode = row[headerMap.get("Site_Code")!];
     const itemDescription = row[headerMap.get("Item_Description")!];
-    const upc = row[headerMap.get("UPC")!];
+    const upcCode = row[headerMap.get("UPC")!];
     const saleDate = row[headerMap.get("Sale_Date")!];
     const unitPrice = parseFloat(row[headerMap.get("Unit_Price")!]);
-    const finalTotal = parseFloat(row[headerMap.get("Final_Total")!]);
+    const finalAmount = parseFloat(row[headerMap.get("Final_Total")!]);
 
-    const { location_id, normalized_location_id } = normalizeLocationId(siteCode, "vendor_b");
+    const { location_code } = normalizeLocationId(siteCode, "vendor_b");
 
     return {
-      location_id,
-      normalized_location_id,
+      location_code: siteCode,
+      location_id: location_code,
       product_name: itemDescription,
-      scancode: upc,
+      upc_code: upcCode,
       transaction_date: new Date(saleDate).toISOString(),
-      price: unitPrice,
-      total_amount: finalTotal,
+      unit_price: unitPrice,
+      final_amount: finalAmount,
       vendor: "vendor_b",
-      raw_data: row,
     };
   });
 }
@@ -157,33 +149,28 @@ export function validateTransactionData(transactions: Partial<SalesTransaction>[
     const errors: string[] = [];
 
     // Required fields validation
-    if (!transaction.location_id) errors.push("Location ID is required");
+    if (!transaction.location_code) errors.push("Location code is required");
     if (!transaction.product_name) errors.push("Product name is required");
-    if (!transaction.scancode) errors.push("Scancode is required");
+    if (!transaction.upc_code) errors.push("UPC code is required");
     if (!transaction.transaction_date) errors.push("Transaction date is required");
 
     // Data type validation
-    if (isNaN(transaction.price!)) errors.push("Price must be a valid number");
-    if (isNaN(transaction.total_amount!)) errors.push("Total amount must be a valid number");
+    if (isNaN(transaction.unit_price!)) errors.push("Unit price must be a valid number");
+    if (isNaN(transaction.final_amount!)) errors.push("Final amount must be a valid number");
 
     // Value range validation
-    if (transaction.price! <= 0) errors.push("Price must be greater than 0");
-    if (transaction.total_amount! <= 0) errors.push("Total amount must be greater than 0");
+    if (transaction.unit_price! <= 0) errors.push("Unit price must be greater than 0");
+    if (transaction.final_amount! <= 0) errors.push("Final amount must be greater than 0");
 
     // Date validation
     const transactionDate = new Date(transaction.transaction_date!);
     if (isNaN(transactionDate.getTime())) {
       errors.push("Invalid transaction date format");
-    } else {
-      const now = new Date();
-      if (transactionDate > now) {
-        errors.push("Transaction date cannot be in the future");
-      }
     }
 
-    // Scancode format validation
-    if (!/^\d{9,12}$/.test(transaction.scancode!)) {
-      errors.push("Scancode must be 9-12 digits");
+    // UPC code format validation
+    if (!/^\d{9,12}$/.test(transaction.upc_code!)) {
+      errors.push("UPC code must be 9-12 digits");
     }
 
     if (errors.length > 0) {
