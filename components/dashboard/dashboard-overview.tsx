@@ -6,11 +6,11 @@ import { DataTable } from "@/components/ui/data-table";
 import { inventoryColumns } from "./inventory-columns";
 import { salesColumns } from "./sales-columns";
 import { Button } from "@/components/ui/button";
-import { Plus, Upload, Download, RefreshCw } from "lucide-react";
+import { Plus, Upload, Download, RefreshCw, Trash } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDashboardStore } from "@/store/dashboard-store";
 import Link from "next/link";
-import { InventorySummaryCards } from "@/modules/inventory-summary-cards";
+import { InventorySummaryCards } from "@/components/dashboard/inventory-summary-cards";
 import { AddItemDialog } from "./add-item-dialog";
 import { exportSalesToCSV, exportInventoryToCSV } from "@/utils/export-utils";
 
@@ -25,6 +25,14 @@ export function DashboardOverview() {
   const handleExport = () => {
     exportSalesToCSV(sales);
     exportInventoryToCSV(inventory);
+  };
+  const clearTables = async () => {
+    const response = await fetch("/api/admin/clear-tables", {
+      method: "POST",
+    });
+    if (response.ok) {
+      initializeData();
+    }
   };
 
   return (
@@ -45,6 +53,10 @@ export function DashboardOverview() {
             <TabsTrigger value="inventory">Inventory</TabsTrigger>
           </TabsList>
           <div className="flex items-center space-x-2">
+            <Button onClick={clearTables} disabled={loading} variant="outline" size="sm">
+              <Trash className={`h-4 w-4 mr-2`} />
+              Clear Tables
+            </Button>
             <Button onClick={initializeData} disabled={loading} variant="outline" size="sm">
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Refresh

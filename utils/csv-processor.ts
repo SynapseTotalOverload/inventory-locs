@@ -53,6 +53,37 @@ export function detectVendorFormat(headers: string[]): VendorFormat {
   return "unknown";
 }
 
+function normalizeLocationId(
+  locationId: string,
+  vendor: VendorFormat,
+): { location_id: string; normalized_location_id: string } {
+  // Remove any non-alphanumeric characters except underscores and dots
+  const cleaned = locationId.replace(/[^a-zA-Z0-9._]/g, "");
+
+  // Convert to lowercase
+  const normalized = cleaned.toLowerCase();
+
+  // Handle vendor-specific patterns
+  if (vendor === "vendor_a") {
+    // Vendor A format: 2.0_SW_02 -> sw_02
+    return {
+      location_id: locationId,
+      normalized_location_id: normalized.replace(/^\d+\.\d+_/, ""),
+    };
+  } else if (vendor === "vendor_b") {
+    // Vendor B format: SW_02 -> sw_02
+    return {
+      location_id: locationId,
+      normalized_location_id: normalized,
+    };
+  }
+
+  return {
+    location_id: locationId,
+    normalized_location_id: normalized,
+  };
+}
+
 export function normalizeVendorAData(rows: string[][], headers: string[]): Partial<SalesTransaction>[] {
   const headerMap = new Map(headers.map((h, i) => [h, i]));
 
@@ -64,8 +95,11 @@ export function normalizeVendorAData(rows: string[][], headers: string[]): Parti
     const price = parseFloat(row[headerMap.get("Price")!]);
     const totalAmount = parseFloat(row[headerMap.get("Total_Amount")!]);
 
+    const { location_id, normalized_location_id } = normalizeLocationId(locationId, "vendor_a");
+
     return {
-      location_id: locationId,
+      location_id,
+      normalized_location_id,
       product_name: productName,
       scancode,
       transaction_date: new Date(transDate).toISOString(),
@@ -88,8 +122,11 @@ export function normalizeVendorBData(rows: string[][], headers: string[]): Parti
     const unitPrice = parseFloat(row[headerMap.get("Unit_Price")!]);
     const finalTotal = parseFloat(row[headerMap.get("Final_Total")!]);
 
+    const { location_id, normalized_location_id } = normalizeLocationId(siteCode, "vendor_b");
+
     return {
-      location_id: siteCode,
+      location_id,
+      normalized_location_id,
       product_name: itemDescription,
       scancode: upc,
       transaction_date: new Date(saleDate).toISOString(),

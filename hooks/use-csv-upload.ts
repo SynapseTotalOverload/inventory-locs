@@ -1,21 +1,45 @@
 import { useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { CSVService, type CSVPreview, type ValidationResults } from "@/services/csv-service";
 
 interface UseCSVUploadProps {
   onUploadComplete?: () => void;
+}
+
+interface PreviewData {
+  vendor: string;
+  headers: string[];
+  sampleRows: string[][];
+  totalRows: number;
+}
+
+interface ValidationResults {
+  valid: number;
+  invalid: Array<{
+    row: number;
+    errors: string[];
+  }>;
+}
+
+interface UploadResponse {
+  success: boolean;
+  uploadId: string;
+  stats: {
+    totalRecords: number;
+    validRecords: number;
+    invalidRecords: number;
+  };
+  preview: PreviewData;
 }
 
 export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [preview, setPreview] = useState<CSVPreview | null>(null);
+  const [preview, setPreview] = useState<PreviewData | null>(null);
   const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  const csvService = new CSVService();
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -32,10 +56,27 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
 
     setFile(selectedFile);
 
+    // Create preview using the API
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
     try {
-      const { preview, validationResults } = await csvService.processFile(selectedFile);
-      setPreview(preview);
-      setValidationResults(validationResults);
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to process file");
+      }
+
+      const data = (await response.json()) as UploadResponse;
+      setPreview(data.preview);
+      setValidationResults({
+        valid: data.stats.validRecords,
+        invalid: Array(data.stats.invalidRecords).fill({ row: 0, errors: ["Validation failed"] }),
+      });
     } catch (error) {
       toast({
         title: "Error processing file",
@@ -47,19 +88,38 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
   };
 
   const handleUpload = async () => {
-    if (!file || !preview) return;
+    if (!file) return;
 
     setUploading(true);
     setProgress(0);
 
+    const formData = new FormData();
+    formData.append("file", file);
+
     try {
-      await csvService.uploadFile(file, setProgress);
+      // Simulate progress updates
+      const progressInterval = setInterval(() => {
+        setProgress(prev => Math.min(prev + 10, 90));
+      }, 500);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      clearInterval(progressInterval);
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Upload failed");
+      }
+
+      const data = (await response.json()) as UploadResponse;
+      setProgress(100);
 
       toast({
         title: "Upload successful",
-        description: `Processed ${validationResults?.valid || 0} records successfully. ${
-          validationResults?.invalid.length || 0
-        } records had errors.`,
+        description: `Processed ${data.stats.validRecords} records successfully. ${data.stats.invalidRecords} records had errors.`,
       });
 
       clearFile();
