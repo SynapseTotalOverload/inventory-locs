@@ -174,36 +174,43 @@ create table public.csv_uploads (
 ### Design Decisions
 
 1. **UUID Primary Keys**
+
    - Using UUIDs instead of sequential IDs for better security and distribution
    - Prevents enumeration attacks and makes data migration easier
    - Enables better horizontal scaling
 
 2. **Timestamps**
+
    - All tables include `created_at` and `updated_at` fields
    - Helps with auditing and tracking data changes
    - Uses UTC timezone for consistency across regions
 
 3. **Foreign Key Constraints**
+
    - Enforces referential integrity between tables
    - `on delete cascade` for locations and products to automatically clean up related records
    - `on delete set null` for csv_uploads to preserve transaction history
 
 4. **Unique Constraints**
+
    - `locations.name` - Ensures unique location codes
    - `products.sku` - Ensures unique product identifiers
    - `inventory(location_id, product_id)` - Prevents duplicate inventory records
 
 5. **Decimal Precision**
+
    - Using `decimal(10,2)` for monetary values
    - Ensures accurate financial calculations
    - Prevents floating-point rounding errors
 
 6. **JSONB for Error Logs**
+
    - Using JSONB type for `error_log` in csv_uploads
    - Flexible schema for storing various error types
    - Efficient querying and indexing capabilities
 
 7. **Status Tracking**
+
    - CSV uploads include status tracking
    - Helps monitor import progress
    - Enables error handling and retry mechanisms
@@ -227,6 +234,7 @@ create index idx_csv_uploads_uploaded_by on public.csv_uploads(uploaded_by);
 ### Row Level Security (RLS)
 
 All tables have RLS enabled with policies that:
+
 - Allow read access to authenticated users
 - Prevent unauthorized modifications
 - Ensure data isolation between users

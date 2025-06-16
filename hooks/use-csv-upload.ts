@@ -34,12 +34,30 @@ interface UploadResponse {
 export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [processing, setProcessing] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processProgress, setProcessProgress] = useState(0);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [validationResults, setValidationResults] = useState<ValidationResults | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const simulateProgress = (setFn: React.Dispatch<React.SetStateAction<number>>, stopAt: number = 95) => {
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += Math.random() * 5;
+      if (progress >= stopAt) {
+        clearInterval(interval);
+        return;
+      }
+      setFn(Math.min(progress, stopAt));
+    }, 100);
+    return () => {
+      clearInterval(interval);
+      setFn(100);
+    };
+  };
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -55,16 +73,21 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
     }
 
     setFile(selectedFile);
+    setUploading(true);
+    setUploadProgress(0);
 
-    // Create preview using the API
     const formData = new FormData();
     formData.append("file", selectedFile);
+
+    const stopUploadProgress = simulateProgress(setUploadProgress);
 
     try {
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
+
+      stopUploadProgress();
 
       if (!response.ok) {
         const error = await response.json();
@@ -84,6 +107,9 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
         variant: "destructive",
       });
       clearFile();
+    } finally {
+      setUploading(false);
+      setUploadProgress(100);
     }
   };
 
@@ -91,35 +117,36 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
     if (!file) return;
 
     setUploading(true);
-    setProgress(0);
+    setProcessing(true);
+    setUploadProgress(0);
+    setProcessProgress(0);
 
     const formData = new FormData();
     formData.append("file", file);
 
-    try {
-      // Simulate progress updates
-      const progressInterval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90));
-      }, 500);
+    const stopUploadProgress = simulateProgress(setUploadProgress);
 
+    try {
       const response = await fetch("/api/upload", {
         method: "POST",
         body: formData,
       });
 
-      clearInterval(progressInterval);
+      stopUploadProgress();
 
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || "Upload failed");
       }
 
-      const data = (await response.json()) as UploadResponse;
-      setProgress(100);
+      const stopProcessingProgress = simulateProgress(setProcessProgress);
+
+      const data = await response.json();
+      stopProcessingProgress();
 
       toast({
         title: "Upload successful",
-        description: `Processed ${data.stats.validRecords} records successfully. ${data.stats.invalidRecords} records had errors.`,
+        description: `Processed ${data.stats.validRecords} records successfully. ${data.stats.invalidRecords} had errors.`,
       });
 
       clearFile();
@@ -131,8 +158,12 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
         variant: "destructive",
       });
     } finally {
-      setUploading(false);
-      setProgress(0);
+      setTimeout(() => {
+        setUploading(false);
+        setProcessing(false);
+        setUploadProgress(0);
+        setProcessProgress(0);
+      }, 1000);
     }
   };
 
@@ -148,7 +179,9 @@ export function useCSVUpload({ onUploadComplete }: UseCSVUploadProps = {}) {
   return {
     file,
     uploading,
-    progress,
+    processing,
+    uploadProgress,
+    processProgress,
     preview,
     validationResults,
     fileInputRef,

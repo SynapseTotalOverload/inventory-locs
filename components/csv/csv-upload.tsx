@@ -19,7 +19,9 @@ export function CSVUpload({ onUploadComplete }: CSVUploadProps) {
   const {
     file,
     uploading,
-    progress,
+    processing,
+    uploadProgress,
+    processProgress,
     preview,
     validationResults,
     fileInputRef,
@@ -164,13 +166,17 @@ export function CSVUpload({ onUploadComplete }: CSVUploadProps) {
         )}
 
         {/* Upload Progress */}
-        {uploading && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span>Processing...</span>
-              <span>{progress}%</span>
-            </div>
-            <Progress value={progress} />
+        {(uploading || processing) && (
+          <div className="space-y-4">
+            {uploading && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span>Uploading file...</span>
+                  <span>{uploadProgress.toFixed(2)} %</span>
+                </div>
+                <Progress value={uploadProgress} />
+              </div>
+            )}
           </div>
         )}
 
