@@ -265,17 +265,17 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (inventoryCheckError && inventoryCheckError.code !== "PGRST116") {
-        // PGRST116 is "no rows returned"
         console.error(`Failed to check inventory:`, inventoryCheckError);
         continue;
       }
 
       if (existingInventory) {
-        // Update existing inventory
+        // Update existing inventory - subtract sold quantity
+        const newQuantity = Math.max(0, (existingInventory.quantity || 0) - update.quantity);
         const { error: updateError } = await supabase
           .from("inventory")
           .update({
-            quantity: existingInventory.quantity - update.quantity,
+            quantity: newQuantity,
             last_updated: new Date().toISOString(),
             updated_by: session.user.id,
           })
@@ -285,11 +285,11 @@ export async function POST(request: NextRequest) {
           console.error(`Failed to update inventory:`, updateError);
         }
       } else {
-        // Create new inventory record
+        // Create new inventory record with initial quantity
         const { error: insertError } = await supabase.from("inventory").insert({
           location_id: location.id,
           product_id: product.id,
-          quantity: null,
+          quantity: 0, // Start with 0 since we're subtracting sold items
           min_stock_level: 0,
           max_stock_level: 1000,
           last_updated: new Date().toISOString(),
