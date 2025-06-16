@@ -23,8 +23,6 @@ export function AddItemDialog({ open, onOpenChange, onSuccess }: AddItemDialogPr
     quantity: "1",
     location_code: "",
     vendor: "vendor_a",
-    category: "standard",
-    custom_category: "",
   });
   const { toast } = useToast();
   const supabase = createClient();
@@ -41,7 +39,6 @@ export function AddItemDialog({ open, onOpenChange, onSuccess }: AddItemDialogPr
           quantity: parseInt(formData.quantity),
           location_code: formData.location_code,
           vendor: formData.vendor,
-          category: formData.category === "custom" ? formData.custom_category : formData.category,
           transaction_date: new Date().toISOString(),
           final_amount: parseFloat(formData.unit_price) * parseInt(formData.quantity),
         },
@@ -123,30 +120,6 @@ export function AddItemDialog({ open, onOpenChange, onSuccess }: AddItemDialogPr
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <Select value={formData.category} onValueChange={value => setFormData({ ...formData, category: value })}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="premium">Premium</SelectItem>
-                <SelectItem value="custom">Custom</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {formData.category === "custom" && (
-            <div className="space-y-2">
-              <Label htmlFor="custom_category">Custom Category Name</Label>
-              <Input
-                id="custom_category"
-                value={formData.custom_category}
-                onChange={e => setFormData({ ...formData, custom_category: e.target.value })}
-                required
-              />
-            </div>
-          )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel

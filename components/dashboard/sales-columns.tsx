@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { SalesTransaction } from "@/types/inventory";
 import { cn } from "@/lib/utils";
+import { ViewTransactionDialog } from "./view-transaction-dialog";
 
 export const salesColumns: ColumnDef<SalesTransaction>[] = [
   {
@@ -112,47 +114,32 @@ export const salesColumns: ColumnDef<SalesTransaction>[] = [
     },
   },
   {
-    accessorKey: "category",
-    header: ({ column }) => {
-      return (
-        <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
-          Category
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      );
-    },
-    cell: ({ row }) => {
-      const category = row.getValue("category") as string;
-      return (
-        <Badge variant="secondary" className="capitalize">
-          {category}
-        </Badge>
-      );
-    },
-  },
-  {
     id: "actions",
     enableHiding: false,
     cell: ({ row }) => {
       const transaction = row.original;
+      const [showDetails, setShowDetails] = useState(false);
 
       return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-8 w-8 p-0">
-              <span className="sr-only">Open menu</span>
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => transaction.id && navigator.clipboard.writeText(transaction.id)}>
-              Copy transaction ID
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem>View details</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-8 w-8 p-0">
+                <span className="sr-only">Open menu</span>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Actions</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => transaction.id && navigator.clipboard.writeText(transaction.id)}>
+                Copy transaction ID
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setShowDetails(true)}>View details</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <ViewTransactionDialog open={showDetails} onOpenChange={setShowDetails} transaction={transaction} />
+        </>
       );
     },
   },

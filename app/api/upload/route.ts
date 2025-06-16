@@ -285,6 +285,24 @@ export async function POST(request: NextRequest) {
           console.error(`Failed to update inventory:`, updateError);
         }
       } else {
+        // Check for any existing inventory record with the same location_id and product_id
+        const { data: duplicateCheck, error: duplicateError } = await supabase
+          .from("inventory")
+          .select("id")
+          .eq("location_id", location.id)
+          .eq("product_id", product.id)
+          .maybeSingle();
+
+        if (duplicateError) {
+          console.error(`Failed to check for duplicate inventory:`, duplicateError);
+          continue;
+        }
+
+        if (duplicateCheck) {
+          console.error(`Duplicate inventory record found for location ${location.id} and product ${product.id}`);
+          continue;
+        }
+
         // Create new inventory record with initial quantity
         const { error: insertError } = await supabase.from("inventory").insert({
           location_id: location.id,
