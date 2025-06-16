@@ -186,38 +186,11 @@ export async function POST(request: NextRequest) {
 
     // Update inventory for each location/product combination
     for (const update of inventoryUpdates.values()) {
-      // First, get or create the location
-      let location;
-      const { data: existingLocation, error: locationError } = await supabase
-        .from("locations")
-        .select("id")
-        .eq("name", update.location_code)
-        .single();
-
-      if (locationError) {
-        if (locationError.code === "PGRST116") {
-          // Location doesn't exist, create it
-          const { data: newLocation, error: createError } = await supabase
-            .from("locations")
-            .insert({
-              name: update.location_code,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .select("id")
-            .single();
-
-          if (createError) {
-            console.error(`Failed to create location for code ${update.location_code}:`, createError);
-            continue;
-          }
-          location = newLocation;
-        } else {
-          console.error(`Failed to find location for code ${update.location_code}:`, locationError);
-          continue;
-        }
-      } else {
-        location = existingLocation;
+      // Get location ID from our existing map
+      const locationId = locationMap.get(update.location_code);
+      if (!locationId) {
+        console.error(`Location ${update.location_code} not found in location map`);
+        continue;
       }
 
       // Then, get or create the product
@@ -235,8 +208,8 @@ export async function POST(request: NextRequest) {
             .from("products")
             .insert({
               sku: update.upc_code,
-              name: `Product ${update.upc_code}`, // Default name based on UPC
-              unit_price: 0, // Default unit price
+              name: `Product ${update.upc_code}`,
+              unit_price: 0,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
@@ -260,7 +233,7 @@ export async function POST(request: NextRequest) {
       const { data: existingInventory, error: inventoryCheckError } = await supabase
         .from("inventory")
         .select("id, quantity")
-        .eq("location_id", location.id)
+        .eq("location_id", locationId)
         .eq("product_id", product.id)
         .single();
 
@@ -289,7 +262,7 @@ export async function POST(request: NextRequest) {
         const { data: duplicateCheck, error: duplicateError } = await supabase
           .from("inventory")
           .select("id")
-          .eq("location_id", location.id)
+          .eq("location_id", locationId)
           .eq("product_id", product.id)
           .maybeSingle();
 
@@ -299,13 +272,13 @@ export async function POST(request: NextRequest) {
         }
 
         if (duplicateCheck) {
-          console.error(`Duplicate inventory record found for location ${location.id} and product ${product.id}`);
+          console.error(`Duplicate inventory record found for location ${locationId} and product ${product.id}`);
           continue;
         }
 
         // Create new inventory record with initial quantity
         const { error: insertError } = await supabase.from("inventory").insert({
-          location_id: location.id,
+          location_id: locationId,
           product_id: product.id,
           quantity: 0, // Start with 0 since we're subtracting sold items
           min_stock_level: 0,
