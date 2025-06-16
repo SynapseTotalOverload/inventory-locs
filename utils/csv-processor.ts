@@ -92,8 +92,8 @@ export function normalizeVendorAData(rows: string[][], headers: string[]): Parti
     const { location_code } = normalizeLocationId(locationId, "vendor_a");
 
     return {
-      location_code: locationId,
-      location_id: location_code,
+      location_code: location_code,
+
       product_name: productName,
       upc_code: upcCode,
       transaction_date: new Date(transDate).toISOString(),
@@ -118,8 +118,8 @@ export function normalizeVendorBData(rows: string[][], headers: string[]): Parti
     const { location_code } = normalizeLocationId(siteCode, "vendor_b");
 
     return {
-      location_code: siteCode,
-      location_id: location_code,
+      location_code: location_code,
+
       product_name: itemDescription,
       upc_code: upcCode,
       transaction_date: new Date(saleDate).toISOString(),

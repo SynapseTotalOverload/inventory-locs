@@ -118,6 +118,138 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Failed to insert transactions", details: insertError }, { status: 500 });
     }
 
+    // After successful sales transaction insert
+    // Group transactions by location and product
+    const inventoryUpdates = new Map<string, { location_code: string; upc_code: string; quantity: number }>();
+
+    valid.forEach(transaction => {
+      const key = `${transaction.location_code}_${transaction.upc_code}`;
+      const current = inventoryUpdates.get(key) || {
+        location_code: transaction.location_code,
+        upc_code: transaction.upc_code,
+        quantity: 0,
+      };
+      current.quantity += 1; // Each transaction represents one unit sold
+      inventoryUpdates.set(key, current);
+    });
+
+    // Update inventory for each location/product combination
+    for (const update of inventoryUpdates.values()) {
+      // First, get or create the location
+      let location;
+      const { data: existingLocation, error: locationError } = await supabase
+        .from("locations")
+        .select("id")
+        .eq("name", update.location_code)
+        .single();
+
+      if (locationError) {
+        if (locationError.code === "PGRST116") {
+          // Location doesn't exist, create it
+          const { data: newLocation, error: createError } = await supabase
+            .from("locations")
+            .insert({
+              name: update.location_code,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select("id")
+            .single();
+
+          if (createError) {
+            console.error(`Failed to create location for code ${update.location_code}:`, createError);
+            continue;
+          }
+          location = newLocation;
+        } else {
+          console.error(`Failed to find location for code ${update.location_code}:`, locationError);
+          continue;
+        }
+      } else {
+        location = existingLocation;
+      }
+
+      // Then, get or create the product
+      let product;
+      const { data: existingProduct, error: productError } = await supabase
+        .from("products")
+        .select("id")
+        .eq("sku", update.upc_code)
+        .single();
+
+      if (productError) {
+        if (productError.code === "PGRST116") {
+          // Product doesn't exist, create it
+          const { data: newProduct, error: createError } = await supabase
+            .from("products")
+            .insert({
+              sku: update.upc_code,
+              name: `Product ${update.upc_code}`, // Default name based on UPC
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .select("id")
+            .single();
+
+          if (createError) {
+            console.error(`Failed to create product for UPC ${update.upc_code}:`, createError);
+            continue;
+          }
+          product = newProduct;
+        } else {
+          console.error(`Failed to find product for UPC ${update.upc_code}:`, productError);
+          continue;
+        }
+      } else {
+        product = existingProduct;
+      }
+
+      // Check if inventory record exists
+      const { data: existingInventory, error: inventoryCheckError } = await supabase
+        .from("inventory")
+        .select("id, quantity")
+        .eq("location_id", location.id)
+        .eq("product_id", product.id)
+        .single();
+
+      if (inventoryCheckError && inventoryCheckError.code !== "PGRST116") {
+        // PGRST116 is "no rows returned"
+        console.error(`Failed to check inventory:`, inventoryCheckError);
+        continue;
+      }
+
+      if (existingInventory) {
+        // Update existing inventory
+        const { error: updateError } = await supabase
+          .from("inventory")
+          .update({
+            quantity: existingInventory.quantity - update.quantity,
+            last_updated: new Date().toISOString(),
+            updated_by: session.user.id,
+          })
+          .eq("id", existingInventory.id);
+
+        if (updateError) {
+          console.error(`Failed to update inventory:`, updateError);
+        }
+      } else {
+        // Create new inventory record
+        const { error: insertError } = await supabase.from("inventory").insert({
+          location_id: location.id,
+          product_id: product.id,
+          quantity: null,
+          min_stock_level: 0,
+          max_stock_level: 1000,
+          last_updated: new Date().toISOString(),
+          updated_by: session.user.id,
+        });
+
+        if (insertError) {
+          console.error(`Failed to create inventory record:`, insertError);
+        }
+      }
+    }
+
     // Update upload record with success
     await supabase
       .from("csv_uploads")
